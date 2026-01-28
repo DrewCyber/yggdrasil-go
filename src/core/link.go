@@ -253,6 +253,9 @@ func (l *links) add(u *url.URL, sintf string, linkType linkType) error {
 		// Store the state of the link so that it can be queried later.
 		l._links[info] = state
 
+		// Notify that a peer has been added
+		l.core.notifyPeerChange()
+
 		// Track how many consecutive connection failures we have had,
 		// as we will back off exponentially rather than hammering the
 		// remote node endlessly.
@@ -367,6 +370,9 @@ func (l *links) add(u *url.URL, sintf string, linkType linkType) error {
 					state._conn = lc
 					state._err = nil
 					state._errtime = time.Now()
+
+					// Notify that peer connection state has changed
+					l.core.notifyPeerChange()
 				})
 				if doRet {
 					return
@@ -374,7 +380,8 @@ func (l *links) add(u *url.URL, sintf string, linkType linkType) error {
 
 				// Give the connection to the handler. The handler will block
 				// for the lifetime of the connection.
-				switch err = l.handler(linkType, options, lc, resetBackoff, false); {
+				err = l.handler(linkType, options, lc, resetBackoff, false)
+				switch {
 				case errors.Is(err, ErrLinkToSelf):
 					// This is a pretty permanent error, don't retry.
 					backoff = -1
@@ -390,12 +397,18 @@ func (l *links) add(u *url.URL, sintf string, linkType linkType) error {
 				// update the link state.
 				_ = lc.Close()
 				phony.Block(l, func() {
+					wasConnected := state._conn != nil
 					state._conn = nil
 					if err == nil {
 						err = fmt.Errorf("remote side closed the connection")
 					}
 					state._err = err
 					state._errtime = time.Now()
+
+					// Notify that peer connection state has changed if we had an active connection
+					if wasConnected {
+						l.core.notifyPeerChange()
+					}
 				})
 
 				// If the link is persistently configured, back off if needed
@@ -432,6 +445,9 @@ func (l *links) remove(u *url.URL, sintf string, _ linkType) error {
 			if conn := state._conn; conn != nil {
 				retErr = conn.Close()
 			}
+
+			// Notify that a peer has been removed
+			l.core.notifyPeerChange()
 			return
 		}
 

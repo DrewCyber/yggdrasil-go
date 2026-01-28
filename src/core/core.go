@@ -43,7 +43,8 @@ type Core struct {
 		nodeinfoPrivacy    NodeInfoPrivacy            // immutable after startup
 		_allowedPublicKeys map[[32]byte]struct{}      // configurable after startup
 	}
-	pathNotify func(ed25519.PublicKey)
+	pathNotify         func(ed25519.PublicKey)
+	peerChangeCallback PeerChangeCallback
 }
 
 func New(cert *tls.Certificate, logger Logger, opts ...SetupOption) (*Core, error) {
@@ -229,6 +230,42 @@ func (c *Core) SetPathNotify(notify func(ed25519.PublicKey)) {
 	c.Act(nil, func() {
 		c.pathNotify = notify
 	})
+}
+
+// SetPeerChangeCallback sets a callback function that will be called whenever
+// the peer connection state changes. This includes when peers connect, disconnect,
+// or are added/removed. The callback receives the count of connected peers and
+// the total count of configured peers.
+//
+// Pass nil to remove the callback.
+//
+// This function is safe to call from any goroutine.
+func (c *Core) SetPeerChangeCallback(callback PeerChangeCallback) {
+	c.Act(nil, func() {
+		c.peerChangeCallback = callback
+	})
+}
+
+// notifyPeerChange triggers the peer change callback if one is set.
+// Instead of calling GetPeers() (which would deadlock if called from links actor),
+// this spawns a goroutine to safely get peer info and trigger the callback.
+func (c *Core) notifyPeerChange() {
+	if c.peerChangeCallback == nil {
+		return
+	}
+
+	// Get peer info in a separate goroutine to avoid deadlock
+	// (GetPeers blocks on links actor, but we might be called FROM links actor)
+	go func() {
+		peers := c.GetPeers()
+		connected := 0
+		for _, p := range peers {
+			if p.Up {
+				connected++
+			}
+		}
+		c.peerChangeCallback(connected, len(peers))
+	}()
 }
 
 type Logger interface {
