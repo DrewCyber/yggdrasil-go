@@ -254,7 +254,9 @@ func (l *links) add(u *url.URL, sintf string, linkType linkType) error {
 		l._links[info] = state
 
 		// Notify that a peer has been added
-		l.core.notifyPeerChange()
+		if l.core != nil {
+			l.core.notifyPeerChange()
+		}
 
 		// Track how many consecutive connection failures we have had,
 		// as we will back off exponentially rather than hammering the
@@ -372,7 +374,9 @@ func (l *links) add(u *url.URL, sintf string, linkType linkType) error {
 					state._errtime = time.Now()
 
 					// Notify that peer connection state has changed
-					l.core.notifyPeerChange()
+					if l.core != nil {
+						l.core.notifyPeerChange()
+					}
 				})
 				if doRet {
 					return
@@ -406,7 +410,7 @@ func (l *links) add(u *url.URL, sintf string, linkType linkType) error {
 					state._errtime = time.Now()
 
 					// Notify that peer connection state has changed if we had an active connection
-					if wasConnected {
+					if wasConnected && l.core != nil {
 						l.core.notifyPeerChange()
 					}
 				})
@@ -447,7 +451,9 @@ func (l *links) remove(u *url.URL, sintf string, _ linkType) error {
 			}
 
 			// Notify that a peer has been removed
-			l.core.notifyPeerChange()
+			if l.core != nil {
+				l.core.notifyPeerChange()
+			}
 			return
 		}
 
