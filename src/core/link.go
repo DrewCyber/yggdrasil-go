@@ -385,9 +385,7 @@ func (l *links) add(u *url.URL, sintf string, linkType linkType) error {
 					state._errtime = time.Now()
 
 					// Notify that peer connection state has changed
-					if l.core != nil {
-						l.core.notifyPeerChange()
-					}
+					l.core.notifyPeerChange()
 				})
 				if doRet {
 					return
@@ -421,7 +419,7 @@ func (l *links) add(u *url.URL, sintf string, linkType linkType) error {
 					state._errtime = time.Now()
 
 					// Notify that peer connection state has changed if we had an active connection
-					if wasConnected && l.core != nil {
+					if wasConnected {
 						l.core.notifyPeerChange()
 					}
 				})
