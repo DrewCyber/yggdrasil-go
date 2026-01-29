@@ -249,23 +249,30 @@ func (c *Core) SetPeerChangeCallback(callback PeerChangeCallback) {
 // notifyPeerChange triggers the peer change callback if one is set.
 // Instead of calling GetPeers() (which would deadlock if called from links actor),
 // this spawns a goroutine to safely get peer info and trigger the callback.
+// This function schedules the work in the Core actor to safely access peerChangeCallback.
 func (c *Core) notifyPeerChange() {
-	if c.peerChangeCallback == nil {
-		return
-	}
-
-	// Get peer info in a separate goroutine to avoid deadlock
-	// (GetPeers blocks on links actor, but we might be called FROM links actor)
-	go func() {
-		peers := c.GetPeers()
-		connected := 0
-		for _, p := range peers {
-			if p.Up {
-				connected++
-			}
+	// Schedule in Core actor to safely access peerChangeCallback
+	c.Act(nil, func() {
+		if c.peerChangeCallback == nil {
+			return
 		}
-		c.peerChangeCallback(connected, len(peers))
-	}()
+
+		// Capture callback to avoid accessing it outside the actor
+		callback := c.peerChangeCallback
+
+		// Get peer info in a separate goroutine to avoid deadlock
+		// (GetPeers blocks on links actor, but we might be called FROM links actor)
+		go func() {
+			peers := c.GetPeers()
+			connected := 0
+			for _, p := range peers {
+				if p.Up {
+					connected++
+				}
+			}
+			callback(connected, len(peers))
+		}()
+	})
 }
 
 type Logger interface {
