@@ -248,15 +248,20 @@ func (l *links) add(u *url.URL, sintf string, linkType linkType) error {
 			linkProto: strings.ToUpper(u.Scheme),
 			kick:      make(chan struct{}),
 		}
+
+		// Safety check: ensure core is initialized before accessing it
+		if l.core == nil {
+			retErr = fmt.Errorf("links not properly initialized")
+			return
+		}
+
 		state.ctx, state.cancel = context.WithCancel(l.core.ctx)
 
 		// Store the state of the link so that it can be queried later.
 		l._links[info] = state
 
 		// Notify that a peer has been added
-		if l.core != nil {
-			l.core.notifyPeerChange()
-		}
+		l.core.notifyPeerChange()
 
 		// Track how many consecutive connection failures we have had,
 		// as we will back off exponentially rather than hammering the
