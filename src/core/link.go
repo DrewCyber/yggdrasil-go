@@ -160,6 +160,12 @@ const ErrLinkToSelf = linkError("node cannot connect to self")
 func (l *links) add(u *url.URL, sintf string, linkType linkType) error {
 	var retErr error
 	phony.Block(l, func() {
+		// Safety check: ensure URL is not nil
+		if u == nil {
+			retErr = fmt.Errorf("URL cannot be nil")
+			return
+		}
+
 		// Generate the link info and see whether we think we already
 		// have an open peering to this peer.
 		lu := urlForLinkInfo(*u)

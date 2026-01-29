@@ -1,6 +1,7 @@
 package core
 
 import (
+	"fmt"
 	"net/url"
 	"sync"
 	"testing"
@@ -161,7 +162,10 @@ func TestPeerChangeCallbackMultipleChanges(t *testing.T) {
 
 	// Add multiple peers rapidly
 	for i := 0; i < 3; i++ {
-		peerURL, _ := url.Parse("tls://127.0.0.1:" + string(rune('0'+9000+i)))
+		peerURL, err := url.Parse(fmt.Sprintf("tls://127.0.0.1:%d", 9000+i))
+		if err != nil {
+			t.Fatalf("Failed to parse URL: %v", err)
+		}
 		_ = node.links.add(peerURL, "", linkTypePersistent)
 		time.Sleep(10 * time.Millisecond)
 	}
