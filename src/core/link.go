@@ -43,6 +43,9 @@ type links struct {
 	// _links can only be modified safely from within the links actor
 	_links     map[linkInfo]*link // *link is nil if connection in progress
 	_listeners map[*Listener]context.CancelFunc
+	// _peerListener receives peer up/down transitions on behalf of
+	// SetPeerListener; only read and written from within the links actor.
+	_peerListener func(PeerEvent)
 }
 
 type linkProtocol interface {
@@ -140,6 +143,15 @@ func (l *links) shutdown() {
 			}
 		}
 	})
+}
+
+// _notifyPeer delivers a peer transition to the listener installed via
+// SetPeerListener, if any. Called only from within the links actor, so
+// deliveries are ordered with each other and with _links mutations.
+func (l *links) _notifyPeer(info linkInfo, inbound, up bool) {
+	if l._peerListener != nil {
+		l._peerListener(PeerEvent{URI: info.uri, Inbound: inbound, Up: up})
+	}
 }
 
 type linkError string
@@ -253,10 +265,11 @@ func (l *links) add(u *url.URL, sintf string, linkType linkType) error {
 		}
 		state.ctx, state.cancel = context.WithCancel(l.core.ctx)
 
-		// Store the state of the link so that it can be queried later.
-		l._links[info] = state
+			// Store the state of the link so that it can be queried later.
+			l._links[info] = state
+			l._notifyPeer(info, false, false)
 
-		// Track how many consecutive connection failures we have had,
+			// Track how many consecutive connection failures we have had,
 		// as we will back off exponentially rather than hammering the
 		// remote node endlessly.
 		var backoff int
@@ -300,12 +313,15 @@ func (l *links) add(u *url.URL, sintf string, linkType linkType) error {
 		// and then running the handler. If the connection is persistent
 		// then the loop will run endlessly, using backoffs as needed.
 		// Otherwise the loop will end, cleaning up the link entry.
-		go func() {
-			defer phony.Block(l, func() {
-				if l._links[info] == state {
-					delete(l._links, info)
-				}
-			})
+			go func() {
+				defer phony.Block(l, func() {
+					if l._links[info] == state {
+						if state._conn != nil {
+							l._notifyPeer(info, false, false)
+						}
+						delete(l._links, info)
+					}
+				})
 
 			// This loop will run each and every time we want to attempt
 			// a connection to this peer.
@@ -328,11 +344,15 @@ func (l *links) add(u *url.URL, sintf string, linkType linkType) error {
 						// If the link is a persistent configured peering,
 						// store information about the connection error so
 						// that we can report it through the admin socket.
-						phony.Block(l, func() {
-							state._conn = nil
-							state._err = err
-							state._errtime = time.Now()
-						})
+					phony.Block(l, func() {
+						wasUp := state._conn != nil
+						state._conn = nil
+						state._err = err
+						state._errtime = time.Now()
+						if wasUp {
+							l._notifyPeer(info, false, false)
+						}
+					})
 
 						// Back off for a bit. If true is returned here, we
 						// can continue onto the next loop iteration to try
@@ -363,6 +383,8 @@ func (l *links) add(u *url.URL, sintf string, linkType linkType) error {
 					if state._conn != nil {
 						// If a peering has come up in this time, abort this one.
 						doRet = true
+					} else {
+						l._notifyPeer(info, false, true)
 					}
 					state._conn = lc
 					state._err = nil
@@ -390,12 +412,16 @@ func (l *links) add(u *url.URL, sintf string, linkType linkType) error {
 				// update the link state.
 				_ = lc.Close()
 				phony.Block(l, func() {
+					wasUp := state._conn != nil
 					state._conn = nil
 					if err == nil {
 						err = fmt.Errorf("remote side closed the connection")
 					}
 					state._err = err
 					state._errtime = time.Now()
+					if wasUp {
+						l._notifyPeer(info, false, false)
+					}
 				})
 
 				// If the link is persistently configured, back off if needed
@@ -558,9 +584,13 @@ func (l *links) listen(u *url.URL, sintf string, local bool) (*Listener, error) 
 
 					// Store the state of the link so that it can be queried later.
 					l._links[info] = state
+					l._notifyPeer(info, true, true)
 				})
 				defer phony.Block(l, func() {
 					if l._links[info] == state {
+						if state._conn != nil {
+							l._notifyPeer(info, true, false)
+						}
 						delete(l._links, info)
 					}
 				})
